@@ -51,6 +51,8 @@ int main() {
 		CloseHandle(siw.hStdError);
 		CloseHandle(pi.hThread);
 		CloseHandle(pi.hProcess);
+
+		return exitcode;
 	}
 
 	MessageBoxW(nullptr, L"Failed to create the game process!", L"NMEUtil Fatal Error", MB_OK | MB_ICONERROR);
