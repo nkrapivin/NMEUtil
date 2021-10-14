@@ -10,7 +10,7 @@ So... why not let the community do the improvements? :p
 
 # How to use?
 
-- Unpack all files from the release zip into the game folder.
+- Unpack all files from the [release zip](https://github.com/nkrapivin/NMEUtil/releases/latest) into the game folder.
 
 - Edit `Initial.lua` to your liking, might also want to peek at other lua files.
 
