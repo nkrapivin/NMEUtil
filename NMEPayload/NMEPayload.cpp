@@ -74,10 +74,6 @@ void CreateConsole() {
 	SetStdHandle(STD_OUTPUT_HANDLE, hConOut);
 	SetStdHandle(STD_ERROR_HANDLE, hConOut);
 	SetStdHandle(STD_INPUT_HANDLE, hConIn);
-	std::wcout.clear();
-	std::wclog.clear();
-	std::wcerr.clear();
-	std::wcin.clear();
 
 	// russian language fix:
 	SetConsoleOutputCP(CP_UTF8);
@@ -88,6 +84,7 @@ void CreateConsole() {
 	EnableVT100(hConOut, false);
 
 	// try outputting something:
+	SetConsoleTitleW(L"NMEPayload Debug Console Window");
 	prf(u8"[-Testing the console--------------------------------------------------]\r\n");
 	prf(u8"NMEPayload by nkrapivindev.\r\n");
 	prf(u8"И помните - шифрование данных игры это ВСЕГДА плохо, КРОМЕ мультиплеера.\r\n");
@@ -218,16 +215,19 @@ void NMEPayload_Start() {
 	MH_ASSERT(MH_EnableHook(MH_ALL_HOOKS));
 }
 
+void NMEConsole_Quit() {
+	prf("[\x1b[34m.\x1b[0m] Bye, I'll miss you :<\r\n");
+	Sleep(1000);
+	FreeConsole();
+	// the game should end here.
+}
+
 void NMEPayload_Quit() {
 	// free everything carefully.
 	prf("[\x1b[32m+\x1b[0m] Removing hooks...\r\n");
 	MH_ASSERT(MH_RemoveHook(NME_Addr<VOID>(0x645a0)));
 	MH_ASSERT(MH_RemoveHook(NME_Addr<VOID>(0x172f0)));
 	MH_ASSERT(MH_Uninitialize());
-	prf("[\x1b[34m.\x1b[0m] Bye, I'll miss you :<\r\n");
-	Sleep(1000);
-	FreeConsole();
-	// the game should end here.
 }
 
 void NME_Start(HMODULE hMe) {
@@ -238,5 +238,6 @@ void NME_Start(HMODULE hMe) {
 
 void NME_Quit() {
 	NMEPayload_Quit();
+	NMEConsole_Quit();
 }
 
