@@ -31,6 +31,9 @@
     <Filter Include="Header Files\Minhook\hde">
       <UniqueIdentifier>{37c4288e-3a16-4f92-b19f-4f11aa8c534b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Lua Example Files">
+      <UniqueIdentifier>{b838f902-6a26-49f1-b623-5706904195c7}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">
@@ -280,5 +283,13 @@
     <ResourceCompile Include="NMEPayload.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="examples\Initial.lua">
+      <Filter>Lua Example Files</Filter>
+    </None>
+    <None Include="examples\MouseUnlock.lua">
+      <Filter>Lua Example Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
