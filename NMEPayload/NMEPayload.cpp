@@ -11,18 +11,44 @@
 #include "lua-5.4.1\src\lua.hpp"
 #include "minhook\include\MinHook.h"
 
-#define MH_ASSERT(__MH_STATUS__) if ((__MH_STATUS__) != (MH_OK)) throw std::runtime_error("MinHook status is not MH_OK.")
+void __MH_ASSERT_FAIL_IMPL(int line, const char* file, const char* func) {
+	static char msgbuf[4096]{ L'\0' };
+
+	memset(msgbuf, 0, sizeof(msgbuf));
+	snprintf(msgbuf, sizeof(msgbuf) - 1, "An error:\r\nFile: %s\r\nFunction: %s\r\nLine: %d", file, func, line);
+	MessageBoxA(GetActiveWindow(), msgbuf, "NMEPayload: Fatal Error", MB_ICONERROR);
+	Sleep(1000);
+	abort();
+}
+
+
+#define MH_ASSERT(__MH_STATUS__) if (((__MH_STATUS__) != (MH_OK))) __MH_ASSERT_FAIL_IMPL(__LINE__, __FILE__, __FUNCTION__)
+
+// VT100 codes:
+#define NIKMSG_OK   "[\x1b[32m+\x1b[0m]"
+#define NIKMSG_ERR  "[\x1b[31m!\x1b[0m]"
+#define NIKMSG_INFO "[\x1b[34m.\x1b[0m]"
 
 typedef int(*printf_t)(const char* _fmt, ...);
 typedef FILE*(__cdecl* __aif_t)(unsigned _Ix);
 static __aif_t* g_acrt_iob_func_game{ nullptr };
+#define GAME_stdin  ((*g_acrt_iob_func_game)(0))
+#define GAME_stdout ((*g_acrt_iob_func_game)(1))
+#define GAME_stderr ((*g_acrt_iob_func_game)(2))
+
 static printf_t prf{ nullptr };
 
-#define GAME_stdin (*g_acrt_iob_func_game)(0)
-#define GAME_stdout (*g_acrt_iob_func_game)(1)
-#define GAME_stderr (*g_acrt_iob_func_game)(2)
+typedef void(*NMInitLuaForProject)(void** projectData);
+typedef void(*NMLuaDoCode)(lua_State* L, char* codeString, char* funcName);
+typedef int(*NikLuaLoadT)(lua_State* L, lua_Reader reader, void* data, const char* chunkname, const char* mode);
 
+static NMInitLuaForProject trampolineP{ nullptr };
+static NMLuaDoCode trampolineC{ nullptr };
+static NikLuaLoadT trampolineL{ nullptr };
+static lua_Reader LuaReaderOriginal{ nullptr };
+static FILE* LuaDumperHandle{ nullptr };
 static lua_State** g_pL{ nullptr };
+static bool g_DoHookFiles{ false };
 
 static HMODULE g_hDLL{ nullptr };
 
@@ -80,7 +106,7 @@ void CreateConsole() {
 	SetConsoleCP(CP_UTF8);
 
 	// enable VT100 support:
-	EnableVT100(hConIn, true);
+	//EnableVT100(hConIn, true);
 	EnableVT100(hConOut, false);
 
 	// try outputting something:
@@ -93,7 +119,7 @@ void CreateConsole() {
 
 void NMEConsole_Start() {
 	CreateConsole();
-	std::cout << "Hi..?" << std::endl;
+	//...
 }
 
 // a simple wrapper to resolve addresses by ghidra offsets.
@@ -101,11 +127,6 @@ template<typename T>
 constexpr T* NME_Addr(ULONG_PTR offs) {
 	return reinterpret_cast<T*>(reinterpret_cast<decltype(offs)>(GetModuleHandleW(nullptr)) + offs);
 }
-
-typedef void(*NMInitLuaForProject)(void** projectData);
-typedef void(*NMLuaDoCode)(lua_State* L, char* codeString, char* funcName);
-static NMInitLuaForProject trampolineP{ nullptr };
-static NMLuaDoCode trampolineC{ nullptr };
 
 const char* LuaErrToString(int errcode) {
 	switch (errcode) {
@@ -129,12 +150,15 @@ void NikInitLuaForProject(void** projectData) {
 	size_t outlen{ 0 };
 	auto luatostring = ((const char* (*)(lua_State * L, int idx, size_t * len))(NME_Addr<VOID>(0xb5026)));
 
+	g_DoHookFiles = true;
+
 	// luaL_loadfile()
 	lret = (((int(*)(lua_State *L, const char *filename, const char *mode))(NME_Addr<VOID>(0xb95ec)))(*g_pL, "Initial.lua", nullptr));
 	if (lret != LUA_OK) {
 		// lua_tolstring()
 		emsg = (luatostring(*g_pL, -1, &outlen));
-		prf("[\x1b[31m!\x1b[0m] There was an error when loading the initial lua file=%s:\r\n", LuaErrToString(lret));
+		prf(NIKMSG_ERR
+			" There was an error when loading the initial lua file=%s:\r\n", LuaErrToString(lret));
 		prf("    %s\r\n", emsg);
 
 		Sleep(2 * 1000);
@@ -145,7 +169,8 @@ void NikInitLuaForProject(void** projectData) {
 	if (lret != LUA_OK) {
 		// lua_tolstring()
 		emsg = (luatostring(*g_pL, -1, &outlen));
-		prf("[\x1b[31m!\x1b[0m] There was an error when executing the initial lua file=%s:\r\n", LuaErrToString(lret));
+		prf(NIKMSG_ERR
+			" There was an error when executing the initial lua file=%s:\r\n", LuaErrToString(lret));
 		prf("    %s\r\n", emsg);
 		
 		Sleep(10 * 1000);
@@ -153,7 +178,8 @@ void NikInitLuaForProject(void** projectData) {
 		return;
 	}
 	
-	prf("[\x1b[32m+\x1b[0m] Initial lua file OK. :)\r\n");
+	prf(NIKMSG_OK
+		" Initial lua file OK. :)\r\n");
 }
 
 void NikLuaDoCode(lua_State* L, char* codeString, char* funcName) {
@@ -185,6 +211,57 @@ void NikLuaDoCode(lua_State* L, char* codeString, char* funcName) {
 	}
 }
 
+const char* NikLuaReaderHook(lua_State* L, void* ud, size_t* sz) {
+	// skip the original file by reading it till end.
+	while (LuaReaderOriginal(L, ud, sz));
+
+	// change the size if you wish...
+	static char readbuffer[512]{ '\0' };
+	
+	// read the whole buffer at once.
+	size_t readread{ fread_s(readbuffer, sizeof(readbuffer), sizeof(readbuffer[0]), sizeof(readbuffer), LuaDumperHandle) };
+	*sz = readread;
+
+	// done?
+	if (readread == 0 && feof(LuaDumperHandle)) {
+		fclose(LuaDumperHandle);
+		LuaDumperHandle = nullptr;
+	}
+
+	return readbuffer;
+}
+
+int NikLuaLoad(lua_State* L, lua_Reader reader, void* data, const char* chunkname, const char* mode) {
+	if (!g_DoHookFiles) return trampolineL(L, reader, data, chunkname, mode);
+
+	int ret{ -1024 };
+
+	// prepare:
+	LuaReaderOriginal = reader;
+	lua_Reader touse{ reader };
+
+	FILE* f{ nullptr };
+	errno_t ok{ fopen_s(&f, chunkname, "rb") };
+	if (f && ok == 0) {
+		LuaDumperHandle = f;
+		touse = &NikLuaReaderHook;
+		prf(NIKMSG_OK
+			" Hooking file '%s'...\r\n", chunkname);
+		// TODO: do something next?
+	}
+	else {
+		// TODO: the file does not exist
+		// so technically we shouldn't do anything?
+		// let's print the filename for now:
+		prf(NIKMSG_INFO
+			" The game tried to load lua file '%s' but it doesn't exist on disk.\r\n", chunkname);
+	}
+	
+
+	ret = trampolineL(L, touse, data, chunkname, mode);
+	return ret;
+}
+
 void NMEPayload_Start() {
 	// address to lua_State* (must be de-refed to get an actual lua_State*)
 	g_pL = NME_Addr<lua_State*>(0x4965e0);
@@ -212,11 +289,20 @@ void NMEPayload_Start() {
 		)
 	);
 
+	MH_ASSERT(
+		MH_CreateHook(
+			NME_Addr<VOID>(0xb6e47),
+			reinterpret_cast<LPVOID >(&NikLuaLoad),
+			reinterpret_cast<LPVOID*>(&trampolineL)
+		)
+	);
+
 	MH_ASSERT(MH_EnableHook(MH_ALL_HOOKS));
 }
 
 void NMEConsole_Quit() {
-	prf("[\x1b[34m.\x1b[0m] Bye, I'll miss you :<\r\n");
+	prf(NIKMSG_INFO
+		" Bye, I'll miss you :<\r\n");
 	Sleep(1000);
 	FreeConsole();
 	// the game should end here.
@@ -224,9 +310,13 @@ void NMEConsole_Quit() {
 
 void NMEPayload_Quit() {
 	// free everything carefully.
-	prf("[\x1b[32m+\x1b[0m] Removing hooks...\r\n");
-	MH_ASSERT(MH_RemoveHook(NME_Addr<VOID>(0x645a0)));
+	prf(NIKMSG_OK
+		" Removing hooks...\r\n");
+	// ... in reverse order
+	MH_ASSERT(MH_RemoveHook(NME_Addr<VOID>(0xb6e47)));
 	MH_ASSERT(MH_RemoveHook(NME_Addr<VOID>(0x172f0)));
+	MH_ASSERT(MH_RemoveHook(NME_Addr<VOID>(0x645a0)));
+	// bye MinHook :<
 	MH_ASSERT(MH_Uninitialize());
 }
 

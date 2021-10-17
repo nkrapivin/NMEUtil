@@ -291,5 +291,8 @@
     <None Include="examples\MouseUnlock.lua">
       <Filter>Lua Example Files</Filter>
     </None>
+    <None Include="ResourceHook.lua">
+      <Filter>Lua Example Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
