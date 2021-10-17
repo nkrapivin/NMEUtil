@@ -8,6 +8,10 @@ The game was taken down for 'legal reasons',
 
 So... why not let the community do the improvements? :p
 
+# NMEUtil v1.2....?
+
+Hell no, the NME itself is huge and I have college homework to do, sorry.
+
 # How to use?
 
 - Unpack all files from the [release zip](https://github.com/nkrapivin/NMEUtil/releases/latest) into the game folder.
